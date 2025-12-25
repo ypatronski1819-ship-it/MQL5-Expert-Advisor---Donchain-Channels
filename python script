@@ -1,5 +1,5 @@
-py version 3.11.9
-numpy==1.23.5
+# py version 3.11.9
+# numpy==1.23.5
 
 //+------------------------------------------------------------------+
 //| #Using MetaTrader 5 (python library), we start by initializing the    |
