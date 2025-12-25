@@ -1,0 +1,282 @@
+//+------------------------------------------------------------------+
+//|                                DonchianSignalNotifier.mq5         |
+//|                          Donchian Channel Signal Alert System     |
+//|                               No Trading - Notifications Only     |
+//+------------------------------------------------------------------+
+#property copyright "Trading System"
+#property link      ""
+#property version   "1.00"
+#property strict
+
+// Input Parameters
+input int      DonchianPeriod = 20;           // Donchian Channel Period
+input int      DonchianOffset = 0;            // Donchian Channel Offset
+input bool     SendPushNotifications = true;  // Send Push Notifications
+input bool     SendEmailAlerts = false;       // Send Email Alerts
+input bool     ShowPopupAlerts = true;        // Show Popup Alerts
+input bool     PlaySoundAlerts = true;        // Play Sound on Signal
+input string   AlertSoundFile = "alert2.wav"; // Alert Sound File
+input bool     DrawArrows = true;             // Draw Signal Arrows on Chart
+input color    BuyArrowColor = clrLime;       // Buy Signal Arrow Color
+input color    SellArrowColor = clrRed;       // Sell Signal Arrow Color
+
+// Global Variables
+double upperBand[], lowerBand[], middleBand[];
+datetime lastBarTime;
+datetime lastBuySignalTime = 0;
+datetime lastSellSignalTime = 0;
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                     |
+//+------------------------------------------------------------------+
+int OnInit()
+{
+   // Validate inputs
+   if(DonchianPeriod <= 0)
+   {
+      Print("❌ Error: Donchian Period must be positive");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+   
+   // Set array as series
+   ArraySetAsSeries(upperBand, true);
+   ArraySetAsSeries(lowerBand, true);
+   ArraySetAsSeries(middleBand, true);
+   
+   lastBarTime = 0;
+   
+   // Display initialization info
+   Print("═══════════════════════════════════════════════");
+   Print("✅ Donchian Signal Notifier EA Initialized");
+   Print("═══════════════════════════════════════════════");
+   Print("📊 Symbol: ", _Symbol);
+   Print("⏰ Timeframe: H1");
+   Print("📈 Donchian Period: ", DonchianPeriod);
+   Print("📱 Push Notifications: ", SendPushNotifications ? "ON" : "OFF");
+   Print("📧 Email Alerts: ", SendEmailAlerts ? "ON" : "OFF");
+   Print("🔔 Popup Alerts: ", ShowPopupAlerts ? "ON" : "OFF");
+   Print("🔊 Sound Alerts: ", PlaySoundAlerts ? "ON" : "OFF");
+   Print("═══════════════════════════════════════════════");
+   Print("⚠️ MODE: SIGNAL ALERTS ONLY - NO TRADING");
+   Print("═══════════════════════════════════════════════");
+   
+   // Test notification on startup
+   if(SendPushNotifications)
+   {
+      string testMsg = "✅ Donchian Signal Notifier Active on " + _Symbol + " H1";
+      SendNotification(testMsg);
+      Print("📱 Test notification sent to mobile device");
+   }
+   
+   return(INIT_SUCCEEDED);
+}
+
+//+------------------------------------------------------------------+
+//| Expert deinitialization function                                   |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+   Print("Donchian Signal Notifier EA Stopped");
+}
+
+//+------------------------------------------------------------------+
+//| Expert tick function                                               |
+//+------------------------------------------------------------------+
+void OnTick()
+{
+   // Check for new bar on H1 timeframe
+   datetime currentBarTime = iTime(_Symbol, PERIOD_H1, 0);
+   
+   if(currentBarTime == lastBarTime)
+      return; // Not a new bar, exit
+      
+   lastBarTime = currentBarTime;
+   
+   // Calculate Donchian Channels
+   if(!CalculateDonchianChannels())
+   {
+      Print("❌ Error calculating Donchian Channels");
+      return;
+   }
+   
+   // Get closed candle information (bar index 1 = previous completed candle)
+   double close1 = iClose(_Symbol, PERIOD_H1, 1);
+   double close2 = iClose(_Symbol, PERIOD_H1, 2);
+   double high1 = iHigh(_Symbol, PERIOD_H1, 1);
+   double low1 = iLow(_Symbol, PERIOD_H1, 1);
+   
+   datetime time1 = iTime(_Symbol, PERIOD_H1, 1);
+   
+   // Check for BUY Signal
+   if(close1 > upperBand[1] && time1 != lastBuySignalTime)
+   {
+      // Confirm breakout - previous candle was at or below upper band
+      if(close2 <= upperBand[2])
+      {
+         lastBuySignalTime = time1;
+         
+         // Create detailed alert message
+         string alertMsg = CreateBuyAlertMessage(close1, upperBand[1]);
+         
+         // Send all enabled alerts
+         SendAllAlerts(alertMsg, true);
+         
+         // Draw arrow on chart
+         if(DrawArrows)
+            DrawSignalArrow("BUY_" + TimeToString(time1), time1, low1, BuyArrowColor, true);
+         
+         Print("═══════════════════════════════════════════════");
+         Print("🟢 BUY SIGNAL DETECTED!");
+         Print("═══════════════════════════════════════════════");
+         Print(alertMsg);
+         Print("═══════════════════════════════════════════════");
+      }
+   }
+   
+   // Check for SELL Signal
+   if(close1 < lowerBand[1] && time1 != lastSellSignalTime)
+   {
+      // Confirm breakout - previous candle was at or above lower band
+      if(close2 >= lowerBand[2])
+      {
+         lastSellSignalTime = time1;
+         
+         // Create detailed alert message
+         string alertMsg = CreateSellAlertMessage(close1, lowerBand[1]);
+         
+         // Send all enabled alerts
+         SendAllAlerts(alertMsg, false);
+         
+         // Draw arrow on chart
+         if(DrawArrows)
+            DrawSignalArrow("SELL_" + TimeToString(time1), time1, high1, SellArrowColor, false);
+         
+         Print("═══════════════════════════════════════════════");
+         Print("🔴 SELL SIGNAL DETECTED!");
+         Print("═══════════════════════════════════════════════");
+         Print(alertMsg);
+         Print("═══════════════════════════════════════════════");
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Donchian Channels manually                              |
+//+------------------------------------------------------------------+
+bool CalculateDonchianChannels()
+{
+   ArrayResize(upperBand, 10);
+   ArrayResize(lowerBand, 10);
+   ArrayResize(middleBand, 10);
+   
+   for(int i = 0; i < 10; i++)
+   {
+      int highestBar = iHighest(_Symbol, PERIOD_H1, MODE_HIGH, DonchianPeriod, i);
+      int lowestBar = iLowest(_Symbol, PERIOD_H1, MODE_LOW, DonchianPeriod, i);
+      
+      if(highestBar == -1 || lowestBar == -1)
+         return false;
+         
+      upperBand[i] = iHigh(_Symbol, PERIOD_H1, highestBar);
+      lowerBand[i] = iLow(_Symbol, PERIOD_H1, lowestBar);
+      middleBand[i] = (upperBand[i] + lowerBand[i]) / 2.0;
+   }
+   
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Create BUY alert message                                          |
+//+------------------------------------------------------------------+
+string CreateBuyAlertMessage(double closePrice, double upperBandLevel)
+{
+   string msg = "🟢 BUY SIGNAL - " + _Symbol + "\n";
+   msg += "⏰ Timeframe: 1H\n";
+   msg += "📈 Breakout: ABOVE Upper Donchian\n";
+   msg += "💰 Close Price: " + DoubleToString(closePrice, _Digits) + "\n";
+   msg += "📊 Upper Band: " + DoubleToString(upperBandLevel, _Digits) + "\n";
+   msg += "⏱️ Time: " + TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES) + "\n";
+   msg += "━━━━━━━━━━━━━━━━━━━━\n";
+   msg += "Consider LONG position";
+   
+   return msg;
+}
+
+//+------------------------------------------------------------------+
+//| Create SELL alert message                                         |
+//+------------------------------------------------------------------+
+string CreateSellAlertMessage(double closePrice, double lowerBandLevel)
+{
+   string msg = "🔴 SELL SIGNAL - " + _Symbol + "\n";
+   msg += "⏰ Timeframe: 1H\n";
+   msg += "📉 Breakout: BELOW Lower Donchian\n";
+   msg += "💰 Close Price: " + DoubleToString(closePrice, _Digits) + "\n";
+   msg += "📊 Lower Band: " + DoubleToString(lowerBandLevel, _Digits) + "\n";
+   msg += "⏱️ Time: " + TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES) + "\n";
+   msg += "━━━━━━━━━━━━━━━━━━━━\n";
+   msg += "Consider SHORT position";
+   
+   return msg;
+}
+
+//+------------------------------------------------------------------+
+//| Send all enabled alert types                                      |
+//+------------------------------------------------------------------+
+void SendAllAlerts(string message, bool isBuySignal)
+{
+   // Clean message for mobile notification (remove formatting)
+   string cleanMsg = message;
+   StringReplace(cleanMsg, "\n", " | ");
+   
+   // Push notification to mobile
+   if(SendPushNotifications)
+   {
+      if(SendNotification(cleanMsg))
+         Print("📱 Push notification sent successfully");
+      else
+         Print("❌ Failed to send push notification");
+   }
+   
+   // Email alert
+   if(SendEmailAlerts)
+   {
+      string subject = (isBuySignal ? "🟢 BUY" : "🔴 SELL") + " Signal: " + _Symbol + " H1";
+      if(SendMail(subject, message))
+         Print("📧 Email alert sent successfully");
+      else
+         Print("❌ Failed to send email alert");
+   }
+   
+   // Popup alert
+   if(ShowPopupAlerts)
+   {
+      Alert(message);
+   }
+   
+   // Sound alert
+   if(PlaySoundAlerts)
+   {
+      PlaySound(AlertSoundFile);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Draw signal arrow on chart                                        |
+//+------------------------------------------------------------------+
+void DrawSignalArrow(string objName, datetime time, double price, color arrowColor, bool isBuy)
+{
+   // Delete if exists
+   ObjectDelete(0, objName);
+   
+   // Create arrow
+   if(ObjectCreate(0, objName, OBJ_ARROW, 0, time, price))
+   {
+      ObjectSetInteger(0, objName, OBJPROP_COLOR, arrowColor);
+      ObjectSetInteger(0, objName, OBJPROP_WIDTH, 3);
+      ObjectSetInteger(0, objName, OBJPROP_ARROWCODE, isBuy ? 233 : 234); // Up/Down arrow
+      ObjectSetInteger(0, objName, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
+      ObjectSetString(0, objName, OBJPROP_TOOLTIP, isBuy ? "BUY Signal" : "SELL Signal");
+   }
+}
+
+//+------------------------------------------------------------------+
