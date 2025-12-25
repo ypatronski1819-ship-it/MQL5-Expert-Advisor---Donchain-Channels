@@ -1,0 +1,15 @@
+py version 3.11.9
+numpy==1.23.5
+
+//+------------------------------------------------------------------+
+//| #Using MetaTrader 5 (python library), we start by initializing the platform.|
+//+------------------------------------------------------------------+
+
+import pandas as pd
+import numpy as np
+import MetaTrader5 as mt5
+from datetime import datetime
+
+if not mt5.initialize(): # Initialize the MetaTrader 5 platform
+    print("initialize() failed")
+    mt5.shutdown()
