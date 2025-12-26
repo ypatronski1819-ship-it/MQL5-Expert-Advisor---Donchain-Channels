@@ -42,5 +42,13 @@ if __name__ == "__main__":
         
         if df is not None:
              print(df.head())
+
+             # Print column name explicitly
+             print("\nColumns:", df.columns.tolist())
+
+             # Print last 5 bars
+             print("\nLast 5 bars:\n", df.tail())
+
+
              print("\nLast bar time:", df["time"].iloc[-1])
              print("Total bar:", len(df))
